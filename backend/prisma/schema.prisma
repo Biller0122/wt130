@@ -1,0 +1,299 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── AUTH ────────────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      Role     @default(CLIENT)
+  clientId  String?
+  client    Client?  @relation(fields: [clientId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+}
+
+enum Role {
+  ADMIN
+  MECHANIC
+  MANAGER
+  CLIENT
+}
+
+// ─── CLIENTS (харилцагч компани) ─────────────────────────────────────────────
+
+model Client {
+  id        String    @id @default(cuid())
+  name      String
+  phone     String?
+  email     String?
+  address   String?
+  users     User[]
+  machines  Machine[]
+  createdAt DateTime  @default(now())
+}
+
+// ─── MACHINES (техник) ───────────────────────────────────────────────────────
+
+model Machine {
+  id           String        @id @default(cuid())
+  parkNumber   String        @unique
+  model        String        @default("WT-130")
+  manufacturer String        @default("LOVOL")
+  serialNumber String?
+  yearMade     Int?
+  location     String?
+  status       MachineStatus @default(ACTIVE)
+  currentSmr   Float         @default(0)
+  lastSmrDate  DateTime?
+  dailyAvgSmr  Float         @default(14)
+  clientId     String?
+  client       Client?       @relation(fields: [clientId], references: [id])
+
+  breakdowns   Breakdown[]
+  pmRecords    PMRecord[]
+  orderItems   OrderItem[]
+  predictions  Prediction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([parkNumber])
+  @@index([status])
+}
+
+enum MachineStatus {
+  ACTIVE
+  IN_REPAIR
+  STANDBY
+  DECOMMISSIONED
+}
+
+// ─── PM RECORDS (үйлчилгээний бүртгэл) ──────────────────────────────────────
+
+model PMRecord {
+  id          String    @id @default(cuid())
+  machineId   String
+  machine     Machine   @relation(fields: [machineId], references: [id])
+  pmType      Int
+  doneAt      DateTime
+  smrAtPM     Float
+  mechanic    String?
+  notes       String?
+  nextPMSmr   Float?
+
+  partsUsed   PMPartUsed[]
+
+  createdAt   DateTime  @default(now())
+
+  @@index([machineId])
+  @@index([doneAt])
+}
+
+model PMPartUsed {
+  id        String   @id @default(cuid())
+  pmId      String
+  pm        PMRecord @relation(fields: [pmId], references: [id])
+  partId    String
+  part      Part     @relation(fields: [partId], references: [id])
+  quantity  Float
+  unit      String   @default("ш")
+}
+
+// ─── BREAKDOWNS (эвдрэлийн бүртгэл) ─────────────────────────────────────────
+
+model Breakdown {
+  id           String          @id @default(cuid())
+  machineId    String
+  machine      Machine         @relation(fields: [machineId], references: [id])
+  category     String
+  description  String
+  smrAtBreak   Float?
+  reportedAt   DateTime
+  startedAt    DateTime?
+  resolvedAt   DateTime?
+  downtimeHrs  Float?
+  status       BreakdownStatus @default(OPEN)
+  mechanic     String?
+  workReport   String?
+  partsUsed    BreakdownPart[]
+
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([machineId])
+  @@index([category])
+  @@index([reportedAt])
+}
+
+enum BreakdownStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  PENDING_PARTS
+}
+
+model BreakdownPart {
+  id          String    @id @default(cuid())
+  breakdownId String
+  breakdown   Breakdown @relation(fields: [breakdownId], references: [id])
+  partId      String
+  part        Part      @relation(fields: [partId], references: [id])
+  quantity    Float
+  unit        String    @default("ш")
+}
+
+// ─── PARTS / INVENTORY (сэлбэг, агуулах) ────────────────────────────────────
+
+model Part {
+  id           String          @id @default(cuid())
+  code         String?         @unique
+  name         String
+  nameEn       String?
+  category     PartCategory
+  unit         String          @default("ш")
+  stockQty     Float           @default(0)
+  minStockQty  Float           @default(0)
+  unitPrice    Float?
+  supplier     String?
+  notes        String?
+
+  pmPartsUsed  PMPartUsed[]
+  bdPartsUsed  BreakdownPart[]
+  orderItems   OrderItem[]
+  pmKitItems   PMKitItem[]
+
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([category])
+}
+
+enum PartCategory {
+  OIL_FILTER
+  FUEL_FILTER
+  AIR_FILTER
+  TRANSMISSION_FILTER
+  HYDRAULIC_FILTER
+  ENGINE_OIL
+  TRANSMISSION_FLUID
+  HYDRAULIC_FLUID
+  COOLANT
+  BELT
+  ELECTRICAL
+  TIRE_PARTS
+  DRIVETRAIN
+  BRAKE
+  STRUCTURAL
+  OTHER
+}
+
+// ─── PM KIT (PM тус бүрийн стандарт сэлбэг) ─────────────────────────────────
+
+model PMKit {
+  id        String      @id @default(cuid())
+  model     String      @default("WT-130")
+  pmType    Int
+  items     PMKitItem[]
+
+  @@unique([model, pmType])
+}
+
+model PMKitItem {
+  id       String @id @default(cuid())
+  kitId    String
+  kit      PMKit  @relation(fields: [kitId], references: [id])
+  partId   String
+  part     Part   @relation(fields: [partId], references: [id])
+  quantity Float
+  unit     String @default("ш")
+}
+
+// ─── ORDERS (захиалга) ───────────────────────────────────────────────────────
+
+model Order {
+  id          String      @id @default(cuid())
+  orderNumber String      @unique @default(cuid())
+  status      OrderStatus @default(DRAFT)
+  type        OrderType   @default(PLANNED)
+  notes       String?
+  createdBy   String?
+  approvedBy  String?
+  items       OrderItem[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+enum OrderStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  ORDERED
+  RECEIVED
+  CANCELLED
+}
+
+enum OrderType {
+  PLANNED
+  EMERGENCY
+  STOCK_REPLENISHMENT
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id])
+  partId    String
+  part      Part    @relation(fields: [partId], references: [id])
+  machineId String?
+  machine   Machine? @relation(fields: [machineId], references: [id])
+  quantity  Float
+  unit      String  @default("ш")
+  reason    String?
+  urgent    Boolean @default(false)
+}
+
+// ─── PREDICTIONS (AI таамаглал) ──────────────────────────────────────────────
+
+model Prediction {
+  id          String   @id @default(cuid())
+  machineId   String
+  machine     Machine  @relation(fields: [machineId], references: [id])
+  type        String
+  riskLevel   String
+  title       String
+  description String
+  recommendation String
+  generatedAt DateTime @default(now())
+  validUntil  DateTime?
+  dismissed   Boolean  @default(false)
+
+  @@index([machineId])
+}
+
+// ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String?
+  clientId  String?
+  type      String
+  title     String
+  body      String
+  read      Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([clientId])
+}
