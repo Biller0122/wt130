@@ -3,10 +3,12 @@ node_modules/
 .npm
 
 # Environment variables
-.env
-.env.local
+# Root .env holds real secrets (ANTHROPIC_API_KEY, etc.) — never commit
+/.env
+*.env.local
 .env.*.local
-.env.tunnel
+# Frontend tunnel config
+frontend/.env.tunnel
 
 # Claude Code local settings
 .claude/settings.local.json

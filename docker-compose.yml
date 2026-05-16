@@ -1,0 +1,50 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wt130}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wt130pass}
+      POSTGRES_DB: ${POSTGRES_DB:-wt130_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wt130} -d ${POSTGRES_DB:-wt130_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wt130}:${POSTGRES_PASSWORD:-wt130pass}@db:5432/${POSTGRES_DB:-wt130_db}
+      JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      PORT: 4000
+      FRONTEND_URL: http://localhost
+      NODE_ENV: production
+      OLLAMA_URL: ${OLLAMA_URL:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:4b}
+    ports:
+      - "4000:4000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  postgres_data:
