@@ -36,7 +36,7 @@ export default function ChatBot() {
       const { data } = await api.post('/chat', { message: msg, history: messages.slice(-6) })
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
     } catch (e: any) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `⚠ Ollama холбогдохгүй байна. \`ollama run ${process.env.VITE_OLLAMA_MODEL || 'gemma3:4b'}\` ажиллуулсан эсэхийг шалгана уу.` }])
+      setMessages(prev => [...prev, { role: 'assistant', content: `⚠ Ollama холбогдохгүй байна. \`ollama run ${import.meta.env.VITE_OLLAMA_MODEL || 'gemma3:4b'}\` ажиллуулсан эсэхийг шалгана уу.` }])
     } finally {
       setLoading(false)
     }

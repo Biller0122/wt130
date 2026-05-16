@@ -44,7 +44,7 @@ ${fleetSummary}`
     })
 
     if (!ollamaRes.ok) throw new Error(`Ollama: ${ollamaRes.status}`)
-    const data = await ollamaRes.json()
+    const data = await ollamaRes.json() as any
     res.json({ reply: data.message?.content ?? 'Хариу байхгүй' })
   } catch (e: any) {
     res.status(500).json({ error: `Ollama холбогдохгүй байна: ${e.message}` })

@@ -1,6 +1,6 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { useAuth } from '../../store/auth'
-import ChatBot from '../ChatBot'
+import { useAuth } from '../store/auth'
+import ChatBot from '../components/ChatBot'
 
 const NAV = [
   { to: '/',            icon: '⊞', label: 'Хяналтын самбар', roles: ['ALL'] },

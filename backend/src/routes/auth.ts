@@ -37,9 +37,10 @@ router.get('/me', auth, async (req: AuthRequest, res) => {
   const user = await prisma.user.findUnique({
     where: { id: req.user!.id },
     include: { client: true },
-    omit: { password: true } as any,
   })
-  res.json(user)
+  if (!user) return res.json(null)
+  const { password: _, ...safeUser } = user
+  res.json(safeUser)
 })
 
 export default router

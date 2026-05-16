@@ -17,7 +17,7 @@ async function ollamaChat(system: string, user: string): Promise<string> {
     }),
   })
   if (!res.ok) throw new Error(`Ollama error: ${res.status} ${await res.text()}`)
-  const data = await res.json()
+  const data = await res.json() as any
   return data.message?.content ?? ''
 }
 
@@ -107,7 +107,7 @@ export async function generateServiceProposal(clientId: string): Promise<string>
 export async function checkOllamaStatus(): Promise<{ running: boolean; model: string; url: string }> {
   try {
     const res = await fetch(`${OLLAMA_URL}/api/tags`)
-    const data = await res.json()
+    const data = await res.json() as any
     const models = data.models?.map((m: any) => m.name) ?? []
     const hasModel = models.some((m: string) => m.includes('gemma'))
     return { running: true, model: hasModel ? OLLAMA_MODEL : `${OLLAMA_MODEL} (татагдаагүй)`, url: OLLAMA_URL }
