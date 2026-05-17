@@ -153,11 +153,11 @@ export default function InventoryPage() {
     try {
       const fd = new FormData()
       fd.append('file', file)
-      const res = await api.post(`/warehouses/${selectedWarehouse}/import`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      // Content-Type тавихгүй — axios өөрөө boundary-тай multipart/form-data тавина
+      const res = await api.post(`/warehouses/${selectedWarehouse}/import`, fd)
       setImportResult(res.data)
       qc.invalidateQueries({ queryKey: ['inventory', selectedWarehouse] })
+      qc.invalidateQueries({ queryKey: ['warehouses'] })
     } catch (e: any) {
       alert(e.response?.data?.error || 'Import амжилтгүй боллоо')
     } finally {
