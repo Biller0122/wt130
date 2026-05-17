@@ -40,7 +40,7 @@ router.delete('/:id', auth, requireRole('ADMIN', 'MANAGER'), async (req, res) =>
   res.json({ ok: true })
 })
 
-// POST /api/warehouses/:id/import — AI-аар Excel дүн шинжилгээ хийж үлдэгдэл шинэчлэх
+// POST /api/warehouses/:id/import — AI-аар Excel задлаж сэлбэг үүсгэх/шинэчлэх
 router.post('/:id/import', auth, requireRole('ADMIN', 'MANAGER'), upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Файл оруулна уу' })
 
@@ -48,55 +48,44 @@ router.post('/:id/import', auth, requireRole('ADMIN', 'MANAGER'), upload.single(
   const ws = wb.Sheets[wb.SheetNames[0]]
   const rows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '' })
 
+  // Token хэмнэх: 60 мөр, 6 багана, 25 тэмдэгт/нүд
   const nonEmpty = rows.filter((r: any[]) => r.some(c => c !== '' && c != null))
-  // Token хязгаарлалтаас зайлсхийх: max 60 мөр, 6 багана, нүд тус бүр max 25 тэмдэгт
-  const limited = nonEmpty.slice(0, 60)
+  const excelText = nonEmpty.slice(0, 60)
+    .map((row: any[], i: number) =>
+      `${i}:${row.slice(0, 6).map((c: any) => String(c).trim().slice(0, 25)).join('|')}`)
+    .join('\n')
 
-  // Системийн бүх сэлбэгийг авна
   const parts = await prisma.part.findMany()
-  const hasCatalog = parts.length > 0
-
-  // Excel агуулгыг хураангуй текст хэлбэрт оруулах
-  const excelText = limited.map((row: any[], i: number) =>
-    `${i}:${row.slice(0, 6).map((c: any) => String(c).trim().slice(0, 25)).join('|')}`
-  ).join('\n')
 
   const VALID_CATS = ['OIL_FILTER','FUEL_FILTER','AIR_FILTER','TRANSMISSION_FILTER','HYDRAULIC_FILTER',
     'ENGINE_OIL','TRANSMISSION_FLUID','HYDRAULIC_FLUID','COOLANT','BELT',
     'ELECTRICAL','TIRE_PARTS','DRIVETRAIN','BRAKE','STRUCTURAL','OTHER']
 
-  const systemPrompt = hasCatalog
-    ? `Та агуулахын тооллогын Excel файлыг дүн шинжилгээ хийж, системийн сэлбэгүүдтэй тохируулах үүрэгтэй.
-Зөвхөн JSON массив буцаа. Тайлбар, markdown, нэмэлт текст огт бичихгүй.
-Формат: [{"code":"...","name":"...","qty":тоо,"unit":"...","category":"..."}]
-- code: системийн сэлбэгийн код (байхгүй бол "")
-- name: системийн сэлбэгийн яг нэрийг ашиглана
-- qty: Excel-ийн тоо хэмжээ (тоо байна)
-- unit: нэгж (ш/л/кг/м — Excel-ээс уншиж эс бол "ш")
-- category: ${VALID_CATS.join('/')} — нэрнээс таамаглана
-Зөвхөн Excel-д тоо хэмжээтэй мөрийг буцаана.`
-    : `Та агуулахын тооллогын Excel файлыг дүн шинжилгээ хийж сэлбэгийн жагсаалт гаргах үүрэгтэй.
-Зөвхөн JSON массив буцаа. Тайлбар, markdown, нэмэлт текст огт бичихгүй.
-Формат: [{"code":"...","name":"...","qty":тоо,"unit":"...","category":"..."}]
-- code: сэлбэгийн код (Excel-ээс, байхгүй бол "")
-- name: сэлбэгийн нэр (заавал байна)
-- qty: тоо хэмжээ (тоо байна)
-- unit: нэгж (ш/л/кг/м — Excel-ээс уншиж эс бол "ш")
-- category: ${VALID_CATS.join('/')} — нэрнээс таамаглана
-Зөвхөн тоо хэмжээтэй, нэртэй мөрийг буцаана.`
+  // Каталог байвал тохируулахын тулд нэрсийг өгнө (max 100)
+  const catalogHint = parts.length > 0
+    ? `Existing parts (code|name):\n${parts.slice(0, 100).map(p => `${p.code || ''}|${p.name.slice(0, 30)}`).join('\n')}\n\n`
+    : ''
 
-  // Catalog хэт том бол эхний 120-г л явуулна (token хэмнэх)
-  const catalogLines = parts.slice(0, 120).map(p => `${p.code || '—'}|${p.name.slice(0, 30)}|${p.unit}`)
-  const userPrompt = hasCatalog
-    ? `Каталог:\n${catalogLines.join('\n')}\n\nExcel:\n${excelText}\n\nJSON буцаа.`
-    : `Excel:\n${excelText}\n\nJSON буцаа.`
+  const system = `You are an inventory data extractor. Analyze the Excel file content and extract all parts with their quantities.
+Return ONLY a valid JSON array. No explanation, no markdown, no extra text.
+Format: [{"code":"...","name":"...","qty":number,"unit":"...","category":"..."}]
+Rules:
+- name: part name from Excel (required, non-empty)
+- code: part code if present, else ""
+- qty: numeric quantity (required, must be a number)
+- unit: unit from Excel or default "ш"
+- category: guess from name — one of: ${VALID_CATS.join(',')}
+- If existing parts catalog is given, use the exact catalog name when matched
+- Skip rows without a clear name or numeric quantity`
+
+  const user = `${catalogHint}Excel content:\n${excelText}\n\nReturn JSON array of all parts with quantities.`
 
   type AiItem = { code: string; name: string; qty: number; unit?: string; category?: string }
   let aiItems: AiItem[] = []
   let aiError: string | undefined
 
   try {
-    const text = await vllmChat(systemPrompt, [{ role: 'user', content: userPrompt }], 800)
+    const text = await vllmChat(system, [{ role: 'user', content: user }], 800)
     const match = text.match(/\[[\s\S]*\]/)
     if (match) aiItems = JSON.parse(match[0])
   } catch (e: any) {
@@ -105,43 +94,39 @@ router.post('/:id/import', auth, requireRole('ADMIN', 'MANAGER'), upload.single(
 
   const updated: { name: string; qty: number }[] = []
   const created: { name: string; qty: number }[] = []
-  const notFound: string[] = []
 
   for (const item of aiItems) {
-    if (!item.name || typeof item.qty !== 'number' || isNaN(item.qty)) continue
+    if (!item.name?.trim() || typeof item.qty !== 'number' || isNaN(item.qty)) continue
 
-    const part = parts.find(p =>
+    const existing = parts.find(p =>
       (item.code && p.code && p.code.toLowerCase() === item.code.toLowerCase()) ||
       p.name.toLowerCase() === item.name.toLowerCase() ||
       p.name.toLowerCase().includes(item.name.toLowerCase()) ||
       item.name.toLowerCase().includes(p.name.toLowerCase())
     )
 
-    if (part) {
-      await prisma.part.update({ where: { id: part.id }, data: { stockQty: item.qty, warehouseId: req.params.id } })
-      updated.push({ name: part.name, qty: item.qty })
-    } else if (!hasCatalog || !parts.length) {
-      // Каталог хоосон үед шинэ сэлбэг үүсгэнэ
+    if (existing) {
+      await prisma.part.update({ where: { id: existing.id }, data: { stockQty: item.qty, warehouseId: req.params.id } })
+      updated.push({ name: existing.name, qty: item.qty })
+    } else {
       const cat = VALID_CATS.includes(item.category ?? '') ? item.category! : 'OTHER'
       const newPart = await prisma.part.create({
         data: {
-          name: item.name,
-          code: item.code || null,
+          name: item.name.trim(),
+          code: item.code?.trim() || null,
           category: cat as any,
-          unit: item.unit || 'ш',
+          unit: item.unit?.trim() || 'ш',
           stockQty: item.qty,
           minStockQty: 0,
           warehouseId: req.params.id,
         },
       })
       parts.push(newPart)
-      created.push({ name: item.name, qty: item.qty })
-    } else {
-      notFound.push(item.name)
+      created.push({ name: newPart.name, qty: item.qty })
     }
   }
 
-  res.json({ updated, created, notFound, total: aiItems.length, aiError })
+  res.json({ updated, created, notFound: [], total: aiItems.length, aiError })
 })
 
 export default router
