@@ -49,15 +49,16 @@ router.post('/:id/import', auth, requireRole('ADMIN', 'MANAGER'), upload.single(
   const rows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '' })
 
   const nonEmpty = rows.filter((r: any[]) => r.some(c => c !== '' && c != null))
-  const limited = nonEmpty.slice(0, 150)
+  // Token хязгаарлалтаас зайлсхийх: max 60 мөр, 6 багана, нүд тус бүр max 25 тэмдэгт
+  const limited = nonEmpty.slice(0, 60)
 
   // Системийн бүх сэлбэгийг авна
   const parts = await prisma.part.findMany()
   const hasCatalog = parts.length > 0
 
-  // Excel агуулгыг текст хэлбэрт оруулах
+  // Excel агуулгыг хураангуй текст хэлбэрт оруулах
   const excelText = limited.map((row: any[], i: number) =>
-    `${i}: ${row.map((c: any) => String(c).trim()).join(' | ')}`
+    `${i}:${row.slice(0, 6).map((c: any) => String(c).trim().slice(0, 25)).join('|')}`
   ).join('\n')
 
   const VALID_CATS = ['OIL_FILTER','FUEL_FILTER','AIR_FILTER','TRANSMISSION_FILTER','HYDRAULIC_FILTER',
@@ -84,16 +85,18 @@ router.post('/:id/import', auth, requireRole('ADMIN', 'MANAGER'), upload.single(
 - category: ${VALID_CATS.join('/')} — нэрнээс таамаглана
 Зөвхөн тоо хэмжээтэй, нэртэй мөрийг буцаана.`
 
+  // Catalog хэт том бол эхний 120-г л явуулна (token хэмнэх)
+  const catalogLines = parts.slice(0, 120).map(p => `${p.code || '—'}|${p.name.slice(0, 30)}|${p.unit}`)
   const userPrompt = hasCatalog
-    ? `Системийн сэлбэгийн каталог (Код | Нэр | Нэгж):\n${parts.map(p => `${p.code || '—'} | ${p.name} | ${p.unit}`).join('\n')}\n\nExcel файлын агуулга:\n${excelText}\n\nExcel файл дахь тоо хэмжээг системийн сэлбэгүүдтэй тохируулж JSON буцаа.`
-    : `Excel файлын агуулга:\n${excelText}\n\nЭнэ Excel-ийн бүх сэлбэгийг JSON массив болгон задлаж буцаа.`
+    ? `Каталог:\n${catalogLines.join('\n')}\n\nExcel:\n${excelText}\n\nJSON буцаа.`
+    : `Excel:\n${excelText}\n\nJSON буцаа.`
 
   type AiItem = { code: string; name: string; qty: number; unit?: string; category?: string }
   let aiItems: AiItem[] = []
   let aiError: string | undefined
 
   try {
-    const text = await vllmChat(systemPrompt, [{ role: 'user', content: userPrompt }])
+    const text = await vllmChat(systemPrompt, [{ role: 'user', content: userPrompt }], 800)
     const match = text.match(/\[[\s\S]*\]/)
     if (match) aiItems = JSON.parse(match[0])
   } catch (e: any) {

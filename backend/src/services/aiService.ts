@@ -5,7 +5,8 @@ const VLLM_MODEL = process.env.VLLM_MODEL || 'google/gemma-4-4b-it'
 
 export async function vllmChat(
   system: string,
-  messages: { role: string; content: string }[]
+  messages: { role: string; content: string }[],
+  maxTokens = 1500,
 ): Promise<string> {
   const res = await fetch(`${VLLM_URL}/v1/chat/completions`, {
     method: 'POST',
@@ -17,7 +18,7 @@ export async function vllmChat(
       model: VLLM_MODEL,
       messages: [{ role: 'system', content: system }, ...messages],
       temperature: 0.7,
-      max_tokens: 2048,
+      max_tokens: maxTokens,
     }),
   })
   if (!res.ok) throw new Error(`vLLM error: ${res.status} ${await res.text()}`)
