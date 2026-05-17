@@ -3,6 +3,7 @@ import multer from 'multer'
 import * as XLSX from 'xlsx'
 import { prisma } from '../lib/prisma'
 import { auth, requireRole } from '../middleware/auth'
+import { vllmChat } from '../services/aiService'
 
 const router = Router()
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } })
@@ -39,44 +40,80 @@ router.delete('/:id', auth, requireRole('ADMIN', 'MANAGER'), async (req, res) =>
   res.json({ ok: true })
 })
 
-// POST /api/warehouses/:id/import — Excel-ээр үлдэгдэл шинэчлэх
+// POST /api/warehouses/:id/import — AI-аар Excel дүн шинжилгээ хийж үлдэгдэл шинэчлэх
 router.post('/:id/import', auth, requireRole('ADMIN', 'MANAGER'), upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Файл оруулна уу' })
 
   const wb = XLSX.read(req.file.buffer, { type: 'buffer' })
   const ws = wb.Sheets[wb.SheetNames[0]]
-  const rows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1 })
+  const rows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '' })
 
-  // Толгой мөрийг алгасах — эхний нүд нь тоо биш бол
-  const dataRows = rows.filter(r => r[0] != null && r[1] != null)
-  const skipFirst = dataRows.length > 0 && isNaN(parseFloat(String(dataRows[0][1])))
-  const effectiveRows = skipFirst ? dataRows.slice(1) : dataRows
+  const nonEmpty = rows.filter((r: any[]) => r.some(c => c !== '' && c != null))
+  const limited = nonEmpty.slice(0, 150)
 
   const parts = await prisma.part.findMany({ where: { warehouseId: req.params.id } })
+  if (parts.length === 0) return res.status(400).json({ error: 'Энэ агуулахад сэлбэг байхгүй байна' })
 
-  const updated: string[] = []
+  // Excel агуулгыг текст хэлбэрт оруулах
+  const excelText = limited.map((row: any[], i: number) =>
+    `${i}: ${row.map((c: any) => String(c).trim()).join(' | ')}`
+  ).join('\n')
+
+  // Агуулахын сэлбэгийн жагсаалт
+  const partsList = parts.map(p => `${p.code || '—'} | ${p.name} | ${p.unit}`).join('\n')
+
+  const system = `Та агуулахын тооллогын Excel файлыг дүн шинжилгээ хийж, бүртгэлд байгаа сэлбэгүүдтэй тохируулах үүрэгтэй.
+Зөвхөн JSON массив буцаа. Тайлбар, markdown, нэмэлт текст бичихгүй.
+Формат: [{"code":"...","name":"...","qty":тоо}]
+- code: системийн сэлбэгийн код (байхгүй бол "")
+- name: системийн сэлбэгийн нэр ЯМАН АЧА байна гэсэн нэрийг ашиглана
+- qty: Excel-ийн тоо хэмжээ (заавал тоо байна)
+Зөвхөн Excel-д тоо хэмжээтэй, системд байгаа сэлбэгүүдийг буцаана.`
+
+  const user = `Агуулахын сэлбэгийн жагсаалт (Код | Нэр | Нэгж):
+${partsList}
+
+Excel файлын агуулга:
+${excelText}
+
+Excel файл дахь тоо хэмжээг агуулахын сэлбэгүүдтэй тохируулж JSON буцаа.`
+
+  let aiItems: { code: string; name: string; qty: number }[] = []
+  let aiError: string | undefined
+
+  try {
+    const text = await vllmChat(system, [{ role: 'user', content: user }])
+    const match = text.match(/\[[\s\S]*?\]/)
+    if (match) aiItems = JSON.parse(match[0])
+  } catch (e: any) {
+    aiError = e.message
+  }
+
+  const updated: { name: string; qty: number }[] = []
   const notFound: string[] = []
 
-  for (const row of effectiveRows) {
-    const identifier = String(row[0]).trim()
-    const qty = parseFloat(String(row[1]))
-    if (!identifier || isNaN(qty)) continue
-
+  for (const item of aiItems) {
+    if (typeof item.qty !== 'number' || isNaN(item.qty)) continue
     const part = parts.find(p =>
-      (p.code && p.code.toLowerCase() === identifier.toLowerCase()) ||
-      p.name.toLowerCase().includes(identifier.toLowerCase()) ||
-      identifier.toLowerCase().includes(p.name.toLowerCase())
+      (item.code && p.code && p.code.toLowerCase() === item.code.toLowerCase()) ||
+      p.name.toLowerCase() === item.name.toLowerCase() ||
+      p.name.toLowerCase().includes(item.name.toLowerCase()) ||
+      item.name.toLowerCase().includes(p.name.toLowerCase())
     )
-
     if (part) {
-      await prisma.part.update({ where: { id: part.id }, data: { stockQty: qty } })
-      updated.push(part.name)
+      await prisma.part.update({ where: { id: part.id }, data: { stockQty: item.qty } })
+      updated.push({ name: part.name, qty: item.qty })
     } else {
-      notFound.push(identifier)
+      notFound.push(item.name)
     }
   }
 
-  res.json({ updated, notFound, total: effectiveRows.length })
+  res.json({
+    updated,
+    notFound,
+    total: aiItems.length,
+    aiError,
+  })
 })
 
 export default router

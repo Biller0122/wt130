@@ -7,7 +7,7 @@ const th: React.CSSProperties = { padding: '0.625rem 1rem', textAlign: 'left', f
 const inputStyle: React.CSSProperties = { width: '100%', background: '#0f1117', border: '1px solid #2d3148', borderRadius: '8px', padding: '0.5rem 0.75rem', color: '#f1f5f9', fontSize: '0.82rem', boxSizing: 'border-box', outline: 'none' }
 
 type Warehouse = { id: string; name: string; location?: string; _count?: { parts: number } }
-type ImportResult = { updated: string[]; notFound: string[]; total: number }
+type ImportResult = { updated: { name: string; qty: number }[]; notFound: string[]; total: number; aiError?: string }
 
 function WarehouseModal({
   initial, title, onClose, onSave,
@@ -46,20 +46,41 @@ function WarehouseModal({
 function ImportResultPanel({ result, onClose }: { result: ImportResult; onClose: () => void }) {
   return (
     <div style={{ background: '#0f1117', border: '1px solid #1e2132', borderRadius: '10px', padding: '1rem 1.25rem', marginBottom: '1rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
-        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#f1f5f9' }}>Import үр дүн</span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ fontSize: '0.72rem', background: '#1a1d2e', border: '1px solid #2d3158', borderRadius: '6px', padding: '2px 8px', color: '#818cf8', fontWeight: 600 }}>✦ AI шинжилгээ</span>
+          <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#f1f5f9' }}>Үр дүн</span>
+        </div>
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#475569', cursor: 'pointer', fontSize: '1rem', lineHeight: 1 }}>✕</button>
       </div>
-      <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.78rem' }}>
+
+      {result.aiError && (
+        <div style={{ marginBottom: '0.6rem', padding: '0.4rem 0.75rem', background: '#2d1515', borderRadius: '6px', fontSize: '0.7rem', color: '#f87171' }}>
+          AI алдаа: {result.aiError}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: '1.25rem', fontSize: '0.78rem', marginBottom: '0.75rem' }}>
         <span style={{ color: '#4ade80' }}>✓ Шинэчлэгдсэн: <strong>{result.updated.length}</strong></span>
-        <span style={{ color: '#fbbf24' }}>Нийт мөр: <strong>{result.total}</strong></span>
+        <span style={{ color: '#fbbf24' }}>AI уншсан: <strong>{result.total}</strong></span>
         {result.notFound.length > 0 && (
-          <span style={{ color: '#f87171' }}>Олдоогүй: <strong>{result.notFound.length}</strong></span>
+          <span style={{ color: '#f87171' }}>Тохирохгүй: <strong>{result.notFound.length}</strong></span>
         )}
       </div>
+
+      {result.updated.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem', marginBottom: result.notFound.length > 0 ? '0.5rem' : 0 }}>
+          {result.updated.map((u, i) => (
+            <span key={i} style={{ fontSize: '0.68rem', padding: '2px 8px', borderRadius: '9999px', background: '#0f2318', color: '#4ade80', border: '1px solid #166534' }}>
+              {u.name} → {u.qty}
+            </span>
+          ))}
+        </div>
+      )}
+
       {result.notFound.length > 0 && (
-        <div style={{ marginTop: '0.5rem', fontSize: '0.72rem', color: '#64748b' }}>
-          Олдоогүй: {result.notFound.slice(0, 5).join(', ')}{result.notFound.length > 5 ? ` +${result.notFound.length - 5}` : ''}
+        <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+          Тохирохгүй: {result.notFound.slice(0, 5).join(', ')}{result.notFound.length > 5 ? ` +${result.notFound.length - 5}` : ''}
         </div>
       )}
     </div>
@@ -244,10 +265,13 @@ export default function InventoryPage() {
       {/* Excel import bar — only when a warehouse is selected */}
       {selectedWarehouse && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem', padding: '0.65rem 1rem', background: '#0f1117', borderRadius: '10px', border: '1px solid #1e2132' }}>
-          <span style={{ fontSize: '0.78rem', color: '#64748b', flex: 1 }}>
-            Excel-ээр үлдэгдэл шинэчлэх
-            <span style={{ marginLeft: '0.5rem', fontSize: '0.68rem', color: '#334155' }}>(A багана: код/нэр · B багана: тоо хэмжээ)</span>
-          </span>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: '0.78rem', color: '#64748b' }}>Excel-ээр үлдэгдэл шинэчлэх</span>
+            <span style={{ marginLeft: '0.5rem', fontSize: '0.68rem', padding: '1px 6px', borderRadius: '4px', background: '#1a1d2e', border: '1px solid #2d3158', color: '#818cf8' }}>✦ Gemma 4 AI</span>
+            {importing && (
+              <div style={{ marginTop: '3px', fontSize: '0.67rem', color: '#818cf8' }}>AI Excel-ийг шинжилж, сэлбэгүүдтэй тохируулж байна...</div>
+            )}
+          </div>
           <input
             ref={fileRef}
             type="file"
@@ -258,9 +282,9 @@ export default function InventoryPage() {
           <button
             onClick={() => fileRef.current?.click()}
             disabled={importing}
-            style={{ padding: '0.4rem 0.9rem', background: importing ? '#1a2a1a' : '#14532d', color: importing ? '#4ade80' : '#86efac', border: '1px solid #166534', borderRadius: '8px', cursor: importing ? 'not-allowed' : 'pointer', fontSize: '0.78rem', fontWeight: 600, whiteSpace: 'nowrap' }}
+            style={{ padding: '0.4rem 0.9rem', background: importing ? '#1a1d2e' : '#14532d', color: importing ? '#818cf8' : '#86efac', border: `1px solid ${importing ? '#2d3158' : '#166534'}`, borderRadius: '8px', cursor: importing ? 'not-allowed' : 'pointer', fontSize: '0.78rem', fontWeight: 600, whiteSpace: 'nowrap' }}
           >
-            {importing ? '⏳ Уншиж байна...' : '⬆ Excel оруулах'}
+            {importing ? '✦ AI шинжилж байна...' : '⬆ Excel оруулах'}
           </button>
         </div>
       )}
