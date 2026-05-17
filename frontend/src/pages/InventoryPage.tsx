@@ -7,7 +7,7 @@ const th: React.CSSProperties = { padding: '0.625rem 1rem', textAlign: 'left', f
 const inputStyle: React.CSSProperties = { width: '100%', background: '#0f1117', border: '1px solid #2d3148', borderRadius: '8px', padding: '0.5rem 0.75rem', color: '#f1f5f9', fontSize: '0.82rem', boxSizing: 'border-box', outline: 'none' }
 
 type Warehouse = { id: string; name: string; location?: string; _count?: { parts: number } }
-type ImportResult = { updated: { name: string; qty: number }[]; notFound: string[]; total: number; aiError?: string }
+type ImportResult = { updated: { name: string; qty: number }[]; created: { name: string; qty: number }[]; notFound: string[]; total: number; aiError?: string }
 
 function WarehouseModal({
   initial, title, onClose, onSave,
@@ -61,12 +61,24 @@ function ImportResultPanel({ result, onClose }: { result: ImportResult; onClose:
       )}
 
       <div style={{ display: 'flex', gap: '1.25rem', fontSize: '0.78rem', marginBottom: '0.75rem' }}>
-        <span style={{ color: '#4ade80' }}>✓ Шинэчлэгдсэн: <strong>{result.updated.length}</strong></span>
+        {result.updated.length > 0 && <span style={{ color: '#4ade80' }}>✓ Шинэчлэгдсэн: <strong>{result.updated.length}</strong></span>}
+        {result.created.length > 0 && <span style={{ color: '#818cf8' }}>✦ Шинээр нэмэгдсэн: <strong>{result.created.length}</strong></span>}
         <span style={{ color: '#fbbf24' }}>AI уншсан: <strong>{result.total}</strong></span>
-        {result.notFound.length > 0 && (
-          <span style={{ color: '#f87171' }}>Тохирохгүй: <strong>{result.notFound.length}</strong></span>
-        )}
+        {result.notFound.length > 0 && <span style={{ color: '#f87171' }}>Тохирохгүй: <strong>{result.notFound.length}</strong></span>}
       </div>
+
+      {result.created.length > 0 && (
+        <div style={{ marginBottom: '0.5rem' }}>
+          <div style={{ fontSize: '0.67rem', color: '#818cf8', fontWeight: 600, marginBottom: '0.3rem' }}>Шинээр бүртгэгдсэн сэлбэгүүд:</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem' }}>
+            {result.created.map((u, i) => (
+              <span key={i} style={{ fontSize: '0.68rem', padding: '2px 8px', borderRadius: '9999px', background: '#1a1d2e', color: '#818cf8', border: '1px solid #2d3158' }}>
+                {u.name} → {u.qty}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {result.updated.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem', marginBottom: result.notFound.length > 0 ? '0.5rem' : 0 }}>
