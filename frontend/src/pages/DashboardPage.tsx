@@ -135,17 +135,17 @@ export default function DashboardPage() {
         </div>
 
         {/* Low stock */}
-        <div style={S.card}>
+        <div style={{ ...S.card, display: 'flex', flexDirection: 'column' }}>
           <p style={S.secTitle}>▤ Нөөц дутагдал ({lowStock.length})</p>
           {lowStock.length === 0 ? (
             <p style={{ fontSize: '0.8rem', color: '#4ade80' }}>✅ Бүх нөөц хангалттай</p>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {lowStock.slice(0, 6).map((p: any) => (
-                <div key={p.id} style={{ ...S.row }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', overflowY: 'auto', maxHeight: '260px', paddingRight: '4px' }}>
+              {lowStock.map((p: any) => (
+                <div key={p.id} style={{ ...S.row, flexShrink: 0 }}>
                   <span style={{ fontSize: '0.75rem', color: '#e2e8f0', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
                   <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                    <span style={{ fontSize: '0.7rem', color: '#f87171', fontWeight: 600 }}>{p.stockQty}{p.unit}</span>
+                    <span style={{ fontSize: '0.7rem', color: p.stockQty <= 0 ? '#ef4444' : '#fbbf24', fontWeight: 600 }}>{p.stockQty}{p.unit}</span>
                     <span style={{ fontSize: '0.65rem', color: '#475569' }}>/ {p.minStockQty}</span>
                   </div>
                 </div>
