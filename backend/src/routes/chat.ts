@@ -1,9 +1,7 @@
 import { Router } from 'express'
 import { auth } from '../middleware/auth'
 import { prisma } from '../lib/prisma'
-
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434'
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma3:4b'
+import { vllmChat } from '../services/aiService'
 
 const router = Router()
 
@@ -26,28 +24,14 @@ ${fleetSummary}`
 
   const messages = [
     ...history.slice(-6).map((h: any) => ({ role: h.role, content: h.content })),
-    { role: 'user', content: message }
+    { role: 'user', content: message },
   ]
 
   try {
-    const ollamaRes = await fetch(`${OLLAMA_URL}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        stream: false,
-        messages: [
-          { role: 'system', content: system },
-          ...messages
-        ],
-      }),
-    })
-
-    if (!ollamaRes.ok) throw new Error(`Ollama: ${ollamaRes.status}`)
-    const data = await ollamaRes.json() as any
-    res.json({ reply: data.message?.content ?? 'Хариу байхгүй' })
+    const reply = await vllmChat(system, messages)
+    res.json({ reply: reply || 'Хариу байхгүй' })
   } catch (e: any) {
-    res.status(500).json({ error: `Ollama холбогдохгүй байна: ${e.message}` })
+    res.status(500).json({ error: `vLLM холбогдохгүй байна: ${e.message}` })
   }
 })
 

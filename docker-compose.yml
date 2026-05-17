@@ -15,7 +15,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-
   backend:
     build:
       context: ./backend
@@ -31,11 +30,10 @@ services:
       PORT: 4000
       FRONTEND_URL: http://localhost
       NODE_ENV: production
-      OLLAMA_URL: ${OLLAMA_URL:-}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:4b}
+      VLLM_URL: ${VLLM_URL:-http://host.docker.internal:8000}
+      VLLM_MODEL: ${VLLM_MODEL:-google/gemma-4-E4B-it}
     ports:
       - "4000:4000"
-
   frontend:
     build:
       context: ./frontend
@@ -45,6 +43,13 @@ services:
       - backend
     ports:
       - "80:80"
-
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - backend
 volumes:
   postgres_data:

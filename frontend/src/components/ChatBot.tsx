@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+﻿import { useState, useRef, useEffect } from 'react'
 import { api } from '../lib/api'
 
 interface Message {
@@ -36,7 +36,7 @@ export default function ChatBot() {
       const { data } = await api.post('/chat', { message: msg, history: messages.slice(-6) })
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
     } catch (e: any) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `⚠ Ollama холбогдохгүй байна. \`ollama run ${import.meta.env.VITE_OLLAMA_MODEL || 'gemma3:4b'}\` ажиллуулсан эсэхийг шалгана уу.` }])
+      setMessages(prev => [...prev, { role: 'assistant', content: '⚠ AI сервертэй холбогдоход алдаа гарлаа. Дахин оролдоно уу.' }])
     } finally {
       setLoading(false)
     }
@@ -44,7 +44,6 @@ export default function ChatBot() {
 
   return (
     <>
-      {/* Floating button */}
       <button
         onClick={() => setOpen(o => !o)}
         style={{
@@ -61,7 +60,6 @@ export default function ChatBot() {
         {open ? '✕' : '✦'}
       </button>
 
-      {/* Chat window */}
       {open && (
         <div style={{
           position: 'fixed', bottom: '5rem', right: '1.5rem', zIndex: 999,
@@ -71,7 +69,6 @@ export default function ChatBot() {
           boxShadow: '0 8px 40px rgba(0,0,0,0.6)',
           overflow: 'hidden',
         }}>
-          {/* Header */}
           <div style={{ padding: '0.875rem 1rem', borderBottom: '1px solid #1e2132', display: 'flex', alignItems: 'center', gap: '0.625rem', background: '#0f1117' }}>
             <div style={{ width: '30px', height: '30px', borderRadius: '8px', background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.875rem', flexShrink: 0 }}>✦</div>
             <div>
@@ -87,7 +84,6 @@ export default function ChatBot() {
             </button>
           </div>
 
-          {/* Messages */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '0.875rem', display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
             {messages.map((m, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
@@ -116,7 +112,6 @@ export default function ChatBot() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Quick prompts */}
           {messages.length <= 1 && (
             <div style={{ padding: '0 0.875rem 0.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.375rem' }}>
               {QUICK.map(q => (
@@ -125,7 +120,6 @@ export default function ChatBot() {
             </div>
           )}
 
-          {/* Input */}
           <div style={{ padding: '0.75rem', borderTop: '1px solid #1e2132', display: 'flex', gap: '0.5rem', background: '#0f1117' }}>
             <input
               value={input}

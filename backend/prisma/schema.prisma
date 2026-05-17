@@ -154,6 +154,16 @@ model BreakdownPart {
   unit        String    @default("ш")
 }
 
+// ─── WAREHOUSE (агуулах) ─────────────────────────────────────────────────────
+
+model Warehouse {
+  id        String   @id @default(cuid())
+  name      String
+  location  String?
+  parts     Part[]
+  createdAt DateTime @default(now())
+}
+
 // ─── PARTS / INVENTORY (сэлбэг, агуулах) ────────────────────────────────────
 
 model Part {
@@ -168,6 +178,8 @@ model Part {
   unitPrice    Float?
   supplier     String?
   notes        String?
+  warehouseId  String?
+  warehouse    Warehouse?      @relation(fields: [warehouseId], references: [id])
 
   pmPartsUsed  PMPartUsed[]
   bdPartsUsed  BreakdownPart[]
@@ -178,6 +190,7 @@ model Part {
   updatedAt    DateTime        @updatedAt
 
   @@index([category])
+  @@index([warehouseId])
 }
 
 enum PartCategory {

@@ -1,24 +1,32 @@
 import { prisma } from '../lib/prisma'
 
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434'
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma3:4b'
+const VLLM_URL = process.env.VLLM_URL || 'http://localhost:8000'
+const VLLM_MODEL = process.env.VLLM_MODEL || 'google/gemma-4-4b-it'
 
-async function ollamaChat(system: string, user: string): Promise<string> {
-  const res = await fetch(`${OLLAMA_URL}/api/chat`, {
+export async function vllmChat(
+  system: string,
+  messages: { role: string; content: string }[]
+): Promise<string> {
+  const res = await fetch(`${VLLM_URL}/v1/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'ngrok-skip-browser-warning': 'true',
+    },
     body: JSON.stringify({
-      model: OLLAMA_MODEL,
-      stream: false,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
+      model: VLLM_MODEL,
+      messages: [{ role: 'system', content: system }, ...messages],
+      temperature: 0.7,
+      max_tokens: 2048,
     }),
   })
-  if (!res.ok) throw new Error(`Ollama error: ${res.status} ${await res.text()}`)
+  if (!res.ok) throw new Error(`vLLM error: ${res.status} ${await res.text()}`)
   const data = await res.json() as any
-  return data.message?.content ?? ''
+  return data.choices?.[0]?.message?.content ?? ''
+}
+
+async function ollamaChat(system: string, user: string): Promise<string> {
+  return vllmChat(system, [{ role: 'user', content: user }])
 }
 
 export async function generatePredictions(machineId: string) {
@@ -106,12 +114,14 @@ export async function generateServiceProposal(clientId: string): Promise<string>
 
 export async function checkOllamaStatus(): Promise<{ running: boolean; model: string; url: string }> {
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/tags`)
+    const res = await fetch(`${VLLM_URL}/v1/models`, {
+      headers: { 'ngrok-skip-browser-warning': 'true' },
+    })
     const data = await res.json() as any
-    const models = data.models?.map((m: any) => m.name) ?? []
-    const hasModel = models.some((m: string) => m.includes('gemma'))
-    return { running: true, model: hasModel ? OLLAMA_MODEL : `${OLLAMA_MODEL} (татагдаагүй)`, url: OLLAMA_URL }
+    const models: string[] = data.data?.map((m: any) => m.id) ?? []
+    const hasModel = models.some((m) => m.includes('gemma'))
+    return { running: true, model: hasModel ? VLLM_MODEL : `${VLLM_MODEL} (ачаалагдаагүй)`, url: VLLM_URL }
   } catch {
-    return { running: false, model: OLLAMA_MODEL, url: OLLAMA_URL }
+    return { running: false, model: VLLM_MODEL, url: VLLM_URL }
   }
 }

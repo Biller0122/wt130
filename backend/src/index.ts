@@ -13,6 +13,9 @@ import predictionRoutes from './routes/predictions'
 import dashboardRoutes from './routes/dashboard'
 import chatRoutes from './routes/chat'
 import importRoutes from './routes/import'
+import warehouseRoutes from './routes/warehouses'
+import { startScheduler } from './lib/scheduler'
+import advisoryRoutes from './routes/advisory'
 
 dotenv.config()
 
@@ -33,9 +36,14 @@ app.use('/api/predictions', predictionRoutes)
 app.use('/api/dashboard', dashboardRoutes)
 app.use('/api/chat', chatRoutes)
 app.use('/api/import', importRoutes)
+app.use('/api/warehouses', warehouseRoutes)
+app.use('/api/advisory', advisoryRoutes)
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok', ts: new Date() }))
 
-app.listen(PORT, () => console.log(`🚀 Backend running on http://localhost:${PORT}`))
+app.listen(PORT, () => {
+  console.log(`🚀 Backend running on http://localhost:${PORT}`)
+  startScheduler()
+})
 
 export default app

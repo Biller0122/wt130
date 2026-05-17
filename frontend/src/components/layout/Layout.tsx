@@ -10,6 +10,8 @@ const NAV = [
   { to: '/predictions', icon: '✦',  label: 'Таамаглал',        roles: ['ADMIN','MANAGER'] },
   { to: '/inventory',   icon: '▤',  label: 'Агуулах',          roles: ['ADMIN','MANAGER'] },
   { to: '/orders',      icon: '◈',  label: 'Захиалга',         roles: ['ADMIN','MANAGER'] },
+  { to: '/procurement',  icon: '📦', label: 'Татан авалт',      roles: ['ADMIN','MANAGER'] },
+  { to: '/advisory',     icon: '📋', label: 'Санамж',           roles: ['ADMIN','MANAGER'] },
   { to: '/import',      icon: '↑',  label: 'Excel импорт',     roles: ['ADMIN','MANAGER'] },
   { to: '/client',      icon: '◉',  label: 'Харилцагч',        roles: ['ADMIN','MANAGER'] },
 ]
