@@ -3,11 +3,99 @@ import multer from 'multer'
 import * as XLSX from 'xlsx'
 import { prisma } from '../lib/prisma'
 import { auth, requireRole } from '../middleware/auth'
-import { vllmChat } from '../services/aiService'
 
 const router = Router()
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } })
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
 
+// ── Тохиромжтой sheet-ийг автоматаар сонгох ──────────────────────────────────
+function findInventorySheet(wb: XLSX.WorkBook): { ws: XLSX.WorkSheet; sheetName: string } {
+  const sheetPrefKw  = ['үлдэгдэл', 'сэлбэг', 'дата', 'inventory', 'stock']
+  const headerKw     = ['нэр', 'дугаар', 'тоо', 'ширхэг', 'үлдэгдэл', 'нэгж', 'name', 'code', 'qty']
+  const excludeKw    = ['гүйлгээ', 'огноо', 'борлуулах', 'ашиг', 'нийт үнэ', 'transaction']
+
+  function sheetScore(name: string, ws: XLSX.WorkSheet): number {
+    const rows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '' })
+    const nameLow = name.toLowerCase()
+    let score = sheetPrefKw.some(k => nameLow.includes(k)) ? 10 : 0
+
+    for (const row of rows.slice(0, 10)) {
+      const text = row.map((c: any) => String(c).toLowerCase()).join(' ')
+      const hits = headerKw.filter(k => text.includes(k)).length
+      const bad  = excludeKw.filter(k => text.includes(k)).length
+      if (hits >= 3 && bad === 0) { score += hits * 2; break }
+      if (hits >= 2 && bad === 0) { score += hits; break }
+    }
+    return score
+  }
+
+  let best = { score: -1, ws: wb.Sheets[wb.SheetNames[0]], sheetName: wb.SheetNames[0] }
+  for (const name of wb.SheetNames) {
+    const ws = wb.Sheets[name]
+    const s  = sheetScore(name, ws)
+    if (s > best.score) best = { score: s, ws, sheetName: name }
+  }
+  return best
+}
+
+// ── Header мөр + баганы индексийг автоматаар олох ────────────────────────────
+function detectColumns(rows: any[][]): {
+  headerRow: number
+  nameCol: number
+  codeCol: number | null
+  qtyCol:  number | null
+  unitCol: number | null
+} {
+  const nameKw = ['нэр', 'name', 'барааны нэр', 'монгол нэр', 'эдийн нэр', 'бараа / нэр', 'бараа/нэр']
+  const codeKw = ['дугаар', 'сериал', 'код', 'code', 'эдийн дугаар', 'сериал/дугаар']
+  const qtyKw  = ['тоо', 'ширхэг', 'үлдэгдэл', 'qty', 'quantity', 'эхний үлдэгдэл', 'зарлага үлдэгдэл']
+  const qtyEx  = ['нийт', 'total', 'нийт үнэ', 'борлуулах нийт']
+  const unitKw = ['нэгж', 'хэмжээ', 'unit', 'хэмжих нэгж']
+
+  for (let r = 0; r < Math.min(rows.length, 12); r++) {
+    const headers = rows[r].map((c: any) => String(c ?? '').toLowerCase().trim())
+    if (headers.every(h => h === '')) continue
+
+    const nameCol = headers.findIndex(h => nameKw.some(k => h.includes(k)))
+    const codeCol = headers.findIndex(h => codeKw.some(k => h.includes(k)))
+    const qtyCol  = headers.findIndex(h =>
+      qtyKw.some(k => h.includes(k)) && !qtyEx.some(e => h.includes(e))
+    )
+    const unitCol = headers.findIndex(h => unitKw.some(k => h.includes(k)))
+
+    if (nameCol >= 0 && qtyCol >= 0) {
+      return { headerRow: r, nameCol, codeCol: codeCol >= 0 ? codeCol : null, qtyCol, unitCol: unitCol >= 0 ? unitCol : null }
+    }
+  }
+
+  // Fallback: нэр=0, тоо=1
+  return { headerRow: 0, nameCol: 0, codeCol: null, qtyCol: 1, unitCol: null }
+}
+
+// ── Монгол нэрнээс ангилал тодорхойлох ──────────────────────────────────────
+function detectCategory(name: string): string {
+  const n = name.toLowerCase()
+  if (/масло\s*шүүр|маслын\s*шүүр|oil\s*filter|маслыний\s*шүүр/.test(n)) return 'OIL_FILTER'
+  if (/түлшн.{0,4}шүүр|fuel\s*filter|тунгаа.{0,6}шүүр/.test(n)) return 'FUEL_FILTER'
+  if (/агаар\s*шүүгч|air\s*filter/.test(n)) return 'AIR_FILTER'
+  if (/(хидравл|гидр).{0,6}шүүр/.test(n)) return 'HYDRAULIC_FILTER'
+  if (/(хроп|трансмисс).{0,6}шүүр/.test(n)) return 'TRANSMISSION_FILTER'
+  if (/хөдөлгүүрийн\s*тос|engine\s*oil|машины\s*тос/.test(n)) return 'ENGINE_OIL'
+  if (/(хроп|трансмисс).{0,6}тос/.test(n)) return 'TRANSMISSION_FLUID'
+  if (/(гидр|хидравл).{0,6}тос/.test(n)) return 'HYDRAULIC_FLUID'
+  if (/хөргөгч|антифриз|coolant/.test(n)) return 'COOLANT'
+  if (/ремен|belt/.test(n)) return 'BELT'
+  if (/стартер|динам|реле|кабел|электр|electric/.test(n)) return 'ELECTRICAL'
+  if (/дугуй|tire|wheel/.test(n)) return 'TIRE_PARTS'
+  if (/кардан|хроп|муфь|drivetrain/.test(n)) return 'DRIVETRAIN'
+  if (/тормос|brake/.test(n)) return 'BRAKE'
+  return 'OTHER'
+}
+
+// ── Utility ──────────────────────────────────────────────────────────────────
+function cleanStr(v: any): string  { return String(v ?? '').trim() }
+function toQty(v: any): number     { const n = parseFloat(cleanStr(v).replace(/,/g, '')); return isNaN(n) ? -1 : n }
+
+// ── CRUD routes ───────────────────────────────────────────────────────────────
 router.get('/', auth, async (_, res) => {
   const warehouses = await prisma.warehouse.findMany({
     orderBy: { createdAt: 'asc' },
@@ -40,93 +128,81 @@ router.delete('/:id', auth, requireRole('ADMIN', 'MANAGER'), async (req, res) =>
   res.json({ ok: true })
 })
 
-// POST /api/warehouses/:id/import — AI-аар Excel задлаж сэлбэг үүсгэх/шинэчлэх
+// ── POST /api/warehouses/:id/import ──────────────────────────────────────────
 router.post('/:id/import', auth, requireRole('ADMIN', 'MANAGER'), upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Файл оруулна уу' })
 
-  const wb = XLSX.read(req.file.buffer, { type: 'buffer' })
-  const ws = wb.Sheets[wb.SheetNames[0]]
+  const wb = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true })
+
+  // 1. Тохиромжтой sheet сонгох
+  const { ws, sheetName } = findInventorySheet(wb)
   const rows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '' })
 
-  // Token хэмнэх: 60 мөр, 6 багана, 25 тэмдэгт/нүд
-  const nonEmpty = rows.filter((r: any[]) => r.some(c => c !== '' && c != null))
-  const excelText = nonEmpty.slice(0, 60)
-    .map((row: any[], i: number) =>
-      `${i}:${row.slice(0, 6).map((c: any) => String(c).trim().slice(0, 25)).join('|')}`)
-    .join('\n')
+  // 2. Header мөр + баганы индекс
+  const { headerRow, nameCol, codeCol, qtyCol, unitCol } = detectColumns(rows)
 
-  const parts = await prisma.part.findMany()
-
-  const VALID_CATS = ['OIL_FILTER','FUEL_FILTER','AIR_FILTER','TRANSMISSION_FILTER','HYDRAULIC_FILTER',
-    'ENGINE_OIL','TRANSMISSION_FLUID','HYDRAULIC_FLUID','COOLANT','BELT',
-    'ELECTRICAL','TIRE_PARTS','DRIVETRAIN','BRAKE','STRUCTURAL','OTHER']
-
-  // Каталог байвал тохируулахын тулд нэрсийг өгнө (max 100)
-  const catalogHint = parts.length > 0
-    ? `Existing parts (code|name):\n${parts.slice(0, 100).map(p => `${p.code || ''}|${p.name.slice(0, 30)}`).join('\n')}\n\n`
-    : ''
-
-  const system = `You are an inventory data extractor. Analyze the Excel file content and extract all parts with their quantities.
-Return ONLY a valid JSON array. No explanation, no markdown, no extra text.
-Format: [{"code":"...","name":"...","qty":number,"unit":"...","category":"..."}]
-Rules:
-- name: part name from Excel (required, non-empty)
-- code: part code if present, else ""
-- qty: numeric quantity (required, must be a number)
-- unit: unit from Excel or default "ш"
-- category: guess from name — one of: ${VALID_CATS.join(',')}
-- If existing parts catalog is given, use the exact catalog name when matched
-- Skip rows without a clear name or numeric quantity`
-
-  const user = `${catalogHint}Excel content:\n${excelText}\n\nReturn JSON array of all parts with quantities.`
-
-  type AiItem = { code: string; name: string; qty: number; unit?: string; category?: string }
-  let aiItems: AiItem[] = []
-  let aiError: string | undefined
-
-  try {
-    const text = await vllmChat(system, [{ role: 'user', content: user }], 800)
-    const match = text.match(/\[[\s\S]*\]/)
-    if (match) aiItems = JSON.parse(match[0])
-  } catch (e: any) {
-    aiError = e.message
+  if (qtyCol === null) {
+    return res.status(400).json({
+      error: `Тоо хэмжээний багана олдсонгүй (sheet: "${sheetName}"). Толгой мөрт "тоо", "ширхэг", "үлдэгдэл" гэсэн үг байх ёстой.`
+    })
   }
+
+  // 3. Мэдээллийн мөрүүд — max 400
+  const dataRows = rows
+    .slice(headerRow + 1)
+    .filter(row => {
+      const name = cleanStr(row[nameCol])
+      const qty  = toQty(row[qtyCol!])
+      return name.length > 1 && qty >= 0
+    })
+    .slice(0, 400)
+
+  // 4. Системийн бүх сэлбэг
+  const parts = await prisma.part.findMany()
 
   const updated: { name: string; qty: number }[] = []
   const created: { name: string; qty: number }[] = []
 
-  for (const item of aiItems) {
-    if (!item.name?.trim() || typeof item.qty !== 'number' || isNaN(item.qty)) continue
+  for (const row of dataRows) {
+    const name = cleanStr(row[nameCol])
+    const code = codeCol !== null ? cleanStr(row[codeCol]) : ''
+    const qty  = toQty(row[qtyCol!])
+    const unit = unitCol !== null ? cleanStr(row[unitCol]) || 'ш' : 'ш'
+
+    if (!name || qty < 0) continue
 
     const existing = parts.find(p =>
-      (item.code && p.code && p.code.toLowerCase() === item.code.toLowerCase()) ||
-      p.name.toLowerCase() === item.name.toLowerCase() ||
-      p.name.toLowerCase().includes(item.name.toLowerCase()) ||
-      item.name.toLowerCase().includes(p.name.toLowerCase())
+      (code && p.code && p.code === code) ||
+      p.name.toLowerCase() === name.toLowerCase() ||
+      p.name.toLowerCase().includes(name.toLowerCase()) ||
+      name.toLowerCase().includes(p.name.toLowerCase())
     )
 
     if (existing) {
-      await prisma.part.update({ where: { id: existing.id }, data: { stockQty: item.qty, warehouseId: req.params.id } })
-      updated.push({ name: existing.name, qty: item.qty })
+      await prisma.part.update({
+        where: { id: existing.id },
+        data: { stockQty: qty, warehouseId: req.params.id },
+      })
+      updated.push({ name: existing.name, qty })
     } else {
-      const cat = VALID_CATS.includes(item.category ?? '') ? item.category! : 'OTHER'
+      const category = detectCategory(name)
       const newPart = await prisma.part.create({
         data: {
-          name: item.name.trim(),
-          code: item.code?.trim() || null,
-          category: cat as any,
-          unit: item.unit?.trim() || 'ш',
-          stockQty: item.qty,
+          name,
+          code: code || null,
+          category: category as any,
+          unit,
+          stockQty: qty,
           minStockQty: 0,
           warehouseId: req.params.id,
         },
       })
       parts.push(newPart)
-      created.push({ name: newPart.name, qty: item.qty })
+      created.push({ name, qty })
     }
   }
 
-  res.json({ updated, created, notFound: [], total: aiItems.length, aiError })
+  res.json({ updated, created, notFound: [], total: dataRows.length, sheetName })
 })
 
 export default router
